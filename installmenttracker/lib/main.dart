@@ -61,13 +61,14 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  final currency = NumberFormat.currency(locale: 'en_PK', symbol: '₨', decimalDigits: 0);
+  // Update to use 2 decimal places for accuracy.
+  final currency = NumberFormat.currency(locale: 'en_PK', symbol: '₨', decimalDigits: 2);
   final dateFmt = DateFormat('yyyy-MM-dd');
 
   final List<Shareholder> shareholders = [
-    Shareholder(name: 'Afrina Imran', percent: 26.66667, color: const Color(0xFF3B82F6)),
-    Shareholder(name: 'Meraj Uddin', percent: 26.66667, color: const Color(0xFF10B981)),
-    Shareholder(name: 'Muhammad Imran Abbas', percent: 26.66667, color: const Color(0xFFF59E0B)),
+    Shareholder(name: 'Afrina Imran', percent: 80 / 3, color: const Color(0xFF3B82F6)),
+    Shareholder(name: 'Meraj Uddin', percent: 80 / 3, color: const Color(0xFF10B981)),
+    Shareholder(name: 'Muhammad Imran Abbas', percent: 80 / 3, color: const Color(0xFFF59E0B)),
     Shareholder(name: 'Mr X', percent: 20.0, color: const Color(0xFFEF4444)),
   ];
 
@@ -154,19 +155,18 @@ Future<void> _addTransactionDialog() async {
   DateTime date = DateTime.now();
   final formKey = GlobalKey<FormState>();
 
-  // helper to compute human-friendly amount text
+  // helper to compute human-friendly amount breakdown with decimals
   String amountInWords(double? amt) {
     if (amt == null || amt <= 0) return '';
-    int value = amt.floor();
-    int mil = value ~/ 1000000;
-    int remainAfterMil = value % 1000000;
-    int lac = remainAfterMil ~/ 100000;
-    int remainAfterLac = remainAfterMil % 100000;
-    int thousand = remainAfterLac ~/ 1000;
+    int milPart = (amt / 1000000).floor();
+    double rem = amt - milPart * 1000000;
+    int lacPart = (rem / 100000).floor();
+    rem = rem - lacPart * 100000;
+    double thousand = rem / 1000;
     List<String> parts = [];
-    if (mil > 0) parts.add("$mil mil");
-    if (lac > 0) parts.add("$lac lac");
-    if (thousand > 0) parts.add("$thousand thousand");
+    if (milPart > 0) parts.add("${milPart.toStringAsFixed(2)} mil");
+    if (lacPart > 0) parts.add("${lacPart.toStringAsFixed(2)} lac");
+    if (thousand >= 1) parts.add("${thousand.toStringAsFixed(2)} thousand");
     return parts.join(' ');
   }
 
@@ -177,7 +177,7 @@ Future<void> _addTransactionDialog() async {
         builder: (context, setStateDialog) {
           final amtText = amountCtrl.text;
           final double? amt = double.tryParse(amtText.replaceAll(',', ''));
-          String prefixText = amountInWords(amt);
+          String displayText = amountInWords(amt);
           return AlertDialog(
             title: const Text('Add Transaction'),
             content: Form(
@@ -187,29 +187,48 @@ Future<void> _addTransactionDialog() async {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextFormField(
-                            controller: amountCtrl,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            onChanged: (text) {
-                              setStateDialog(() {}); // refresh UI on change
-                            },
-                            decoration: InputDecoration(
-                              labelText: 'Amount (PKR)',
-                              hintText: 'e.g. 150000',
-                              // using suffix to show the computed text
-                              suffix: Text(prefixText),
-                            ),
-                            validator: (v) {
-                              final d = double.tryParse(v?.replaceAll(',', '') ?? '');
-                              if (d == null || d <= 0) return 'Enter a valid amount > 0';
-                              return null;
-                            },
+                    // Amount input field
+                    TextFormField(
+                      controller: amountCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (text) {
+                        setStateDialog(() {});
+                      },
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        labelText: 'Amount (PKR)',
+                        hintText: 'e.g. 150000',
+                      ),
+                      validator: (v) {
+                        final d = double.tryParse(v?.replaceAll(',', '') ?? '');
+                        if (d == null || d <= 0) {
+                          return 'Enter a valid amount > 0';
+                        }
+                        if (d > remainingTotal) {
+                          return 'Amount cannot be greater than remaining amount (${currency.format(remainingTotal)})';
+                        }
+                        return null;
+                      },
+                    ),
+                    // Display amount in words below the text field with improved text style
+                    if (displayText.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          displayText,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    // Row for amount text field and date picker
+                    Row(
+                      children: [
                         Expanded(
                           child: InkWell(
                             onTap: () async {
@@ -230,7 +249,10 @@ Future<void> _addTransactionDialog() async {
                               }
                             },
                             child: InputDecorator(
-                              decoration: const InputDecoration(labelText: 'Date'),
+                              decoration: const InputDecoration(
+                                labelText: 'Date',
+                                border: OutlineInputBorder(),
+                              ),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
@@ -247,6 +269,7 @@ Future<void> _addTransactionDialog() async {
                     TextFormField(
                       controller: noteCtrl,
                       decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
                         labelText: 'Note (optional)',
                       ),
                     ),
@@ -420,7 +443,7 @@ Future<void> _addTransactionDialog() async {
                             color: WidgetStateProperty.all(p.shareholder.color.withOpacity(0.1)),
                             cells: [
                               DataCell(Text(p.shareholder.name)),
-                              DataCell(Text('${p.shareholder.percent.toStringAsFixed(2)}%')),
+                              DataCell(Text('${p.shareholder.percent.toStringAsFixed(3)}%')),
                               DataCell(Text(currency.format(p.amount))),
                             ],
                           ),
@@ -533,11 +556,11 @@ Future<void> _addTransactionDialog() async {
                 ],
               ),
               const SizedBox(height: 6),
-              Text('Share: ${s.percent.toStringAsFixed(2)}%'),
+              Text('Share: ${s.percent.toStringAsFixed(3)}%'),
               const SizedBox(height: 6),
-              Text('Expected: ${currency.format(exp)}'),
-              Text('Received: ${currency.format(rec)}'),
-              Text('Remaining: ${currency.format(rem)}'),
+              Text('Expected: ${currency.format(expectedFor(s))}'),
+              Text('Received: ${currency.format(receivedFor(s))}'),
+              Text('Remaining: ${currency.format(remainingFor(s))}'),
             ],
           ),
         ),
