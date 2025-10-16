@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:csv/csv.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'styles.dart';
 import 'package:intl/intl.dart';
 
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -27,13 +28,21 @@ class InstallmentTrackerApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
         useMaterial3: true,
+        // Make all TextFields use an outlined border by default
+        inputDecorationTheme: const InputDecorationTheme(
+          border: OutlineInputBorder(),
+          enabledBorder: OutlineInputBorder(),
+          focusedBorder: OutlineInputBorder(
+            borderSide: BorderSide(width: 2.0),
+          ),
+        ),
       ),
       home: const HomePage(),
     );
   }
 }
 
-const double kExpectedTotal = 27_500_000;
+double kExpectedTotal = 27_500_000;
 
 class Shareholder {
   Shareholder({required this.name, required this.percent, required this.color});
@@ -195,7 +204,6 @@ Future<void> _addTransactionDialog() async {
                         setStateDialog(() {});
                       },
                       decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
                         labelText: 'Amount (PKR)',
                         hintText: 'e.g. 150000',
                       ),
@@ -269,7 +277,6 @@ Future<void> _addTransactionDialog() async {
                     TextFormField(
                       controller: noteCtrl,
                       decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
                         labelText: 'Note (optional)',
                       ),
                     ),
@@ -443,8 +450,8 @@ Future<void> _addTransactionDialog() async {
                             color: WidgetStateProperty.all(p.shareholder.color.withOpacity(0.1)),
                             cells: [
                               DataCell(Text(p.shareholder.name)),
-                              DataCell(Text('${p.shareholder.percent.toStringAsFixed(3)}%')),
-                              DataCell(Text(currency.format(p.amount))),
+                              DataCell(Text('${p.shareholder.percent.toStringAsFixed(3)}%',style: AppStyles.amount,)),
+                              DataCell(Text(currency.format(p.amount),style: AppStyles.percent,)),
                             ],
                           ),
                         )
@@ -484,13 +491,15 @@ Future<void> _addTransactionDialog() async {
     );
   }
 
-  Widget _summaryCard({required String label, required String value, Color? color, IconData? icon}) {
+  Widget _summaryCard({required String label, required String value, Color? color, IconData? icon, VoidCallback? onTap}) {
     return Card(
       elevation: 0,
       color: color?.withOpacity(0.08),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: InkWell(
+          onTap: onTap,
+          child: Row(
           children: [
             if (icon != null)
               Container(
@@ -507,16 +516,17 @@ Future<void> _addTransactionDialog() async {
               children: [
                 Text(label, style: Theme.of(context).textTheme.labelMedium),
                 const SizedBox(height: 4),
+                // Use centralized amount style for the main value
                 Text(
                   value,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: color ?? Theme.of(context).colorScheme.onSurface,
-                        fontWeight: FontWeight.w700,
-                      ),
+                  style: AppStyles.amount.copyWith(
+                    color: color ?? Theme.of(context).colorScheme.onSurface,
+                  ),
                 ),
               ],
             ),
           ],
+          ),
         ),
       ),
     );
@@ -556,11 +566,12 @@ Future<void> _addTransactionDialog() async {
                 ],
               ),
               const SizedBox(height: 6),
-              Text('Share: ${s.percent.toStringAsFixed(3)}%'),
+              // Show percent using percent style
+              Text('Share: ${s.percent.toStringAsFixed(3)}%', style: AppStyles.percent),
               const SizedBox(height: 6),
-              Text('Expected: ${currency.format(expectedFor(s))}'),
-              Text('Received: ${currency.format(receivedFor(s))}'),
-              Text('Remaining: ${currency.format(remainingFor(s))}'),
+              Text('Expected: ${currency.format(exp)}', style: AppStyles.amount),
+              Text('Received: ${currency.format(rec)}', style: AppStyles.amount),
+              Text('Remaining: ${currency.format(rem)}', style: AppStyles.amount),
             ],
           ),
         ),
@@ -568,57 +579,57 @@ Future<void> _addTransactionDialog() async {
     );
   }
 
-  // Widget _editShares() {
-  //   final sumPercent = shareholders.fold<double>(0, (a, s) => a + s.percent).toStringAsFixed(2);
-  //   return ExpansionTile(
-  //     title: const Text('Edit Shareholders'),
-  //     subtitle: Text('Sum must be 100%. Current: $sumPercent%'),
-  //     childrenPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-  //     children: [
-  //       Wrap(
-  //         runSpacing: 12,
-  //         spacing: 12,
-  //         children: [
-  //           for (var i = 0; i < shareholders.length; i++)
-  //             _ShareEditor(
-  //               key: ValueKey('share-$i'),
-  //               initialName: shareholders[i].name,
-  //               initialPercent: shareholders[i].percent,
-  //               onChanged: (name, pct) {
-  //                 setState(() {
-  //                   shareholders[i].name = name;
-  //                   if (pct != null && pct >= 0) shareholders[i].percent = pct;
-  //                 });
-  //               },
-  //             ),
-  //         ],
-  //       ),
-  //       const SizedBox(height: 8),
-  //       Row(
-  //         children: [
-  //           if (!sharesValid)
-  //             Text(
-  //               'Shares must sum to 100%.',
-  //               style: TextStyle(color: Theme.of(context).colorScheme.error),
-  //             ),
-  //           const Spacer(),
-  //           TextButton(
-  //             onPressed: () {
-  //               setState(() {
-  //                 shareholders[0].percent = 26.66667;
-  //                 shareholders[1].percent = 26.66667;
-  //                 shareholders[2].percent = 26.66667;
-  //                 shareholders[3].percent = 20.0;
-  //               });
-  //             },
-  //             child: const Text('Reset to Original'),
-  //           ),
-  //         ],
-  //       ),
-  //       const SizedBox(height: 8),
-  //     ],
-  //   );
-  // }
+  Widget _editShares() {
+    final sumPercent = shareholders.fold<double>(0, (a, s) => a + s.percent).toStringAsFixed(2);
+    return ExpansionTile(
+      title: const Text('Edit Shareholders'),
+      subtitle: Text('Sum must be 100%. Current: $sumPercent%'),
+      childrenPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      children: [
+        Wrap(
+          runSpacing: 12,
+          spacing: 12,
+          children: [
+            for (var i = 0; i < shareholders.length; i++)
+              _ShareEditor(
+                key: ValueKey('share-$i'),
+                initialName: shareholders[i].name,
+                initialPercent: shareholders[i].percent,
+                onChanged: (name, pct) {
+                  setState(() {
+                    shareholders[i].name = name;
+                    if (pct != null && pct >= 0) shareholders[i].percent = pct;
+                  });
+                },
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            if (!sharesValid)
+              Text(
+                'Shares must sum to 100%.',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            const Spacer(),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  shareholders[0].percent = 26.66667;
+                  shareholders[1].percent = 26.66667;
+                  shareholders[2].percent = 26.66667;
+                  shareholders[3].percent = 20.0;
+                });
+              },
+              child: const Text('Reset to Original'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -628,6 +639,43 @@ Future<void> _addTransactionDialog() async {
         value: currency.format(kExpectedTotal),
         color: Colors.blueGrey.shade900,
         icon: Icons.flag,
+        onTap: () async {
+          // allow editing the expected total
+          final ctrl = TextEditingController(text: kExpectedTotal.toStringAsFixed(2));
+          final formKey = GlobalKey<FormState>();
+          await showDialog<void>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Edit Total Expected'),
+              content: Form(
+                key: formKey,
+                child: TextFormField(
+                  controller: ctrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Total Expected (PKR)'),
+                  validator: (v) {
+                    final d = double.tryParse(v?.replaceAll(',', '') ?? '');
+                    if (d == null || d <= 0) return 'Enter a valid amount > 0';
+                    return null;
+                  },
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                FilledButton(
+                  onPressed: () {
+                    if (!formKey.currentState!.validate()) return;
+                    setState(() {
+                      kExpectedTotal = double.parse(ctrl.text.replaceAll(',', ''));
+                    });
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            ),
+          );
+        },
       ),
       _summaryCard(
         label: 'Total Received',
@@ -692,7 +740,7 @@ Future<void> _addTransactionDialog() async {
               },
             ),
             const SizedBox(height: 8),
-            // _editShares(),
+            _editShares(),
             const SizedBox(height: 12),
 
             Text('Shareholders', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
@@ -750,7 +798,7 @@ Future<void> _addTransactionDialog() async {
                   columns: const [
                     DataColumn(label: Text('Date')),
                     DataColumn(label: Text('Amount (PKR)')),
-                    DataColumn(label: Text('Note')),
+                    DataColumn(columnWidth: FixedColumnWidth(300),label: Text('Note')),
                     DataColumn(label: Text('')),
                   ],
                   rows: [
@@ -759,7 +807,7 @@ Future<void> _addTransactionDialog() async {
                         cells: [
                           DataCell(Text(dateFmt.format(entries[i].date))),
                           DataCell(Text(currency.format(entries[i].amount))),
-                          DataCell(Text(entries[i].note)),
+                          DataCell(Text(entries[i].note.isEmpty ? 'None':entries[i].note)),
                           DataCell(
                             Row(
                               mainAxisSize: MainAxisSize.min,
@@ -793,6 +841,7 @@ Future<void> _addTransactionDialog() async {
 
 class _ShareEditor extends StatefulWidget {
   const _ShareEditor({
+    required Key key,
     required this.initialName,
     required this.initialPercent,
     required this.onChanged,
@@ -834,7 +883,7 @@ class _ShareEditorState extends State<_ShareEditor> {
             flex: 6,
             child: TextField(
               controller: _nameCtrl,
-              decoration: const InputDecoration(labelText: 'Name'),
+                decoration: const InputDecoration(labelText: 'Name'),
               onChanged: (v) => widget.onChanged(v, null),
             ),
           ),
@@ -844,7 +893,7 @@ class _ShareEditorState extends State<_ShareEditor> {
             child: TextField(
               controller: _pctCtrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Percent'),
+                decoration: const InputDecoration(labelText: 'Percent'),
               onChanged: (v) {
                 final d = double.tryParse(v);
                 if (d != null && d >= 0) {
