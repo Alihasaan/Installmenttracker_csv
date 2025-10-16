@@ -55,11 +55,13 @@ class TransactionEntry {
   TransactionEntry({
     required this.date,
     required this.amount,
+    required this.shareholder,
     this.note = '',
   });
 
   DateTime date;
   double amount;
+  Shareholder shareholder;
   String note;
 }
 
@@ -74,7 +76,64 @@ class _HomePageState extends State<HomePage> {
   final currency = NumberFormat.currency(locale: 'en_PK', symbol: '₨', decimalDigits: 2);
   final dateFmt = DateFormat('yyyy-MM-dd');
 
+  Future<void> _saveTotalAmount() async {
+    try {
+      final dataDir = Directory('data');
+      if (!dataDir.existsSync()) {
+        dataDir.createSync(recursive: true);
+      }
+
+      final rows = <List<dynamic>>[
+        ['total_amount'],
+        [kExpectedTotal.toStringAsFixed(2)],
+      ];
+      final csv = const ListToCsvConverter().convert(rows);
+      final csvFile = File('${dataDir.path}/total_amount.csv');
+      await csvFile.writeAsString(csv, encoding: utf8);
+    } catch (e) {
+      _toast('Failed to save total amount: $e', error: true);
+    }
+  }
+
+  Future<void> _loadTotalAmount() async {
+    try {
+      final dataDir = Directory('data');
+      final csvFile = File('${dataDir.path}/total_amount.csv');
+      if (!csvFile.existsSync()) return;
+
+      final content = await csvFile.readAsString(encoding: utf8);
+      final rows = const CsvToListConverter(eol: '\n').convert(content, shouldParseNumbers: false);
+
+      if (rows.length < 2 || rows[0][0] != 'total_amount') return;
+
+      final total = double.tryParse(rows[1][0].toString().trim());
+      if (total != null && total > 0) {
+        setState(() => kExpectedTotal = total);
+      }
+    } catch (_) {}
+  }
+
   final List<Shareholder> shareholders = [
+
+    // Future<void> _saveTotalAmount() async {
+    //   try {
+    //     final dataDir = Directory('data');
+    //     if (!dataDir.existsSync()) {
+    //       dataDir.createSync(recursive: true);
+    //     }
+
+    //     final rows = <List<dynamic>>[
+    //       ['total_amount'],
+    //       [kExpectedTotal.toStringAsFixed(2)],
+    //     ];
+    //     final csv = const ListToCsvConverter().convert(rows);
+    //     final csvFile = File('${dataDir.path}/total_amount.csv');
+    //     await csvFile.writeAsString(csv, encoding: utf8);
+    //   } catch (e) {
+    //     _toast('Failed to save total amount: $e', error: true);
+    //   }
+    // }
+
     Shareholder(name: 'Afrina Imran', percent: 80 / 3, color: const Color(0xFF3B82F6)),
     Shareholder(name: 'Meraj Uddin', percent: 80 / 3, color: const Color(0xFF10B981)),
     Shareholder(name: 'Muhammad Imran Abbas', percent: 80 / 3, color: const Color(0xFFF59E0B)),
@@ -86,7 +145,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _loadTransactionsFromCsv();
+     _loadTotalAmount().then((_) => _loadTransactionsFromCsv());
   }
 
   Future<void> _loadTransactionsFromCsv() async {
@@ -101,7 +160,7 @@ class _HomePageState extends State<HomePage> {
       if (rows.isEmpty) return;
 
       final header = rows.first.map((e) => e.toString().toLowerCase().trim()).toList();
-      if (header.length < 2 || header[0] != 'date' || header[1] != 'amount') return;
+      if (header.length < 3 || header[0] != 'date' || header[1] != 'amount' || header[2] != 'shareholder') return;
 
       final loaded = <TransactionEntry>[];
       for (var i = 1; i < rows.length; i++) {
@@ -111,9 +170,22 @@ class _HomePageState extends State<HomePage> {
         try {
           final date = DateTime.parse(row[0].toString().trim());
           final amount = double.parse(row[1].toString().trim());
-          final note = (row.length >= 3) ? row[2].toString() : '';
+          final shareholderName = row[2].toString().trim();
+          final note = (row.length >= 4) ? row[3].toString() : '';
+          
+          // Find matching shareholder
+          final shareholder = shareholders.firstWhere(
+            (s) => s.name.trim() == shareholderName,
+            orElse: () => throw Exception('Unknown shareholder: $shareholderName'),
+          );
+          
           if (amount <= 0) continue;
-          loaded.add(TransactionEntry(date: date, amount: amount, note: note));
+          loaded.add(TransactionEntry(
+            date: date,
+            amount: amount,
+            shareholder: shareholder,
+            note: note,
+          ));
         } catch (_) {}
       }
 
@@ -135,8 +207,13 @@ class _HomePageState extends State<HomePage> {
       }
 
       final rows = <List<dynamic>>[
-        ['date', 'amount', 'note'],
-        ...entries.map((e) => [e.date.toIso8601String(), e.amount.toStringAsFixed(2), e.note]),
+        ['date', 'amount', 'shareholder', 'note'],
+        ...entries.map((e) => [
+          e.date.toIso8601String(),
+          e.amount.toStringAsFixed(2),
+          e.shareholder.name,
+          e.note
+        ]),
       ];
       final csv = const ListToCsvConverter().convert(rows);
 
@@ -151,7 +228,9 @@ class _HomePageState extends State<HomePage> {
   double get remainingTotal => (kExpectedTotal - totalReceived).clamp(0, double.infinity);
 
   double expectedFor(Shareholder s) => kExpectedTotal * (s.percent / 100);
-  double receivedFor(Shareholder s) => totalReceived * (s.percent / 100);
+  double receivedFor(Shareholder s) => entries
+      .where((e) => e.shareholder == s)
+      .fold<double>(0, (sum, e) => sum + e.amount);
   double remainingFor(Shareholder s) => (expectedFor(s) - receivedFor(s)).clamp(0, double.infinity);
 
   bool get sharesValid {
@@ -162,6 +241,7 @@ Future<void> _addTransactionDialog() async {
   final amountCtrl = TextEditingController();
   final noteCtrl = TextEditingController();
   DateTime date = DateTime.now();
+  Shareholder? selectedShareholder;
   final formKey = GlobalKey<FormState>();
 
   // helper to compute human-friendly amount breakdown with decimals
@@ -212,8 +292,11 @@ Future<void> _addTransactionDialog() async {
                         if (d == null || d <= 0) {
                           return 'Enter a valid amount > 0';
                         }
-                        if (d > remainingTotal) {
-                          return 'Amount cannot be greater than remaining amount (${currency.format(remainingTotal)})';
+                        if (selectedShareholder != null) {
+                          final remaining = remainingFor(selectedShareholder!);
+                          if (d > remaining) {
+                            return 'Amount cannot be greater than remaining amount (${currency.format(remaining)})';
+                          }
                         }
                         return null;
                       },
@@ -233,6 +316,33 @@ Future<void> _addTransactionDialog() async {
                         ),
                       ),
                     ],
+                    const SizedBox(height: 12),
+                    // Shareholder dropdown
+                    DropdownButtonFormField<Shareholder>(
+                      decoration: const InputDecoration(
+                        labelText: 'Shareholder',
+                      ),
+                      value: selectedShareholder,
+                      items: shareholders.map((s) => DropdownMenuItem(
+                        value: s,
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 12,
+                              height: 12,
+                              margin: const EdgeInsets.only(right: 8),
+                              decoration: BoxDecoration(
+                                color: s.color,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            Text(s.name),
+                          ],
+                        ),
+                      )).toList(),
+                      onChanged: (s) => setStateDialog(() => selectedShareholder = s),
+                      validator: (s) => s == null ? 'Select a shareholder' : null,
+                    ),
                     const SizedBox(height: 12),
                     // Row for amount text field and date picker
                     Row(
@@ -295,7 +405,11 @@ Future<void> _addTransactionDialog() async {
                   final amt = double.parse(amountCtrl.text.replaceAll(',', ''));
                   setState(() {
                     entries.add(TransactionEntry(
-                        date: date, amount: amt, note: noteCtrl.text.trim()));
+                      date: date,
+                      amount: amt,
+                      shareholder: selectedShareholder!,
+                      note: noteCtrl.text.trim().isEmpty?"None":noteCtrl.text.trim(),
+                    ));
                     entries.sort((a, b) => a.date.compareTo(b.date));
                   });
                   _saveTransactionsToCsv();
@@ -346,7 +460,22 @@ Future<void> _addTransactionDialog() async {
       if (res == null || res.files.single.path == null) return;
 
       final path = res.files.single.path!;
-      final content = await File(path).readAsString(encoding: utf8);
+       // Check if there's a total_amount.csv in the same directory
+       final totalAmountPath = '${path.substring(0, path.lastIndexOf('/'))}\\total_amount.csv';
+       if (File(totalAmountPath).existsSync()) {
+         try {
+           final totalContent = await File(totalAmountPath).readAsString(encoding: utf8);
+           final totalRows = const CsvToListConverter(eol: '\n').convert(totalContent, shouldParseNumbers: false);
+           if (totalRows.length >= 2 && totalRows[0][0] == 'total_amount') {
+             final total = double.tryParse(totalRows[1][0].toString().trim());
+             if (total != null && total > 0) {
+               setState(() => kExpectedTotal = total);
+             }
+           }
+         } catch (_) {}
+       }
+
+       final content = await File(path).readAsString(encoding: utf8);
       final rows = const CsvToListConverter(eol: '\n').convert(content, shouldParseNumbers: false);
 
       if (rows.isEmpty) {
@@ -355,8 +484,8 @@ Future<void> _addTransactionDialog() async {
       }
 
       final header = rows.first.map((e) => e.toString().toLowerCase().trim()).toList();
-      if (header.length < 2 || header[0] != 'date' || header[1] != 'amount') {
-        _toast('Invalid CSV header. Expected: date,amount,note', error: true);
+      if (header.length < 3 || header[0] != 'date' || header[1] != 'amount' || header[2] != 'shareholder') {
+        _toast('Invalid CSV header. Expected: date,amount,shareholder,note', error: true);
         return;
       }
 
@@ -368,9 +497,22 @@ Future<void> _addTransactionDialog() async {
         try {
           final date = DateTime.parse(row[0].toString().trim());
           final amount = double.parse(row[1].toString().trim());
-          final note = (row.length >= 3) ? row[2].toString() : '';
+          final shareholderName = row[2].toString().trim();
+          final note = (row.length >= 4) ? row[3].toString() : '';
+          
+          // Find matching shareholder
+          final shareholder = shareholders.firstWhere(
+            (s) => s.name.trim() == shareholderName,
+            orElse: () => throw Exception('Unknown shareholder: $shareholderName'),
+          );
+          
           if (amount <= 0) continue;
-          imported.add(TransactionEntry(date: date, amount: amount, note: note));
+          imported.add(TransactionEntry(
+            date: date,
+            amount: amount,
+            shareholder: shareholder,
+            note: note,
+          ));
         } catch (_) {}
       }
 
@@ -400,73 +542,80 @@ Future<void> _addTransactionDialog() async {
   }
 
   void _showSplitDetails(TransactionEntry e) {
-    final parts = shareholders
-        .map((s) => _SharePart(shareholder: s, amount: e.amount * (s.percent / 100)))
-        .toList();
-    final totalParts = parts.fold<double>(0, (sum, p) => sum + p.amount);
+    final shareholder = e.shareholder;
+    final totalExpected = expectedFor(shareholder);
+    final totalReceived = receivedFor(shareholder);
+    final totalRemaining = remainingFor(shareholder);
+    
+    // Calculate total paid up to and including this transaction
+    // final paidUpToThis = entries
+    //     .where((entry) => entry.shareholder == shareholder && 
+    //                      entry.date.compareTo(e.date) <= 0)
+    //     .fold<double>(0, (sum, entry) => sum + entry.amount);
 
     showDialog<void>(
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          title: Text(
-            'Split for ${currency.format(e.amount)} on ${dateFmt.format(e.date)}',
+          title: Row(
+            children: [
+              Container(
+                width: 16,
+                height: 16,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: shareholder.color,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  '${shareholder.name} - Payment Details',
+                  style: TextStyle(color: shareholder.color),
+                ),
+              ),
+            ],
           ),
           content: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (!sharesValid)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
-                    child: Row(
+                Text(
+                  'Transaction: ${currency.format(e.amount)} on ${dateFmt.format(e.date)}',
+                  style: AppStyles.amount,
+                ),
+                if (e.note.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text('Note: ${e.note}'),
+                ],
+                const SizedBox(height: 16),
+                Card(
+                  elevation: 0,
+                  color: shareholder.color.withOpacity(0.1),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.warning_amber_rounded,
-                            color: Theme.of(context).colorScheme.error),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Warning: shares do not sum to 100%.',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                          ),
-                        ),
+                        Text('Share: ${shareholder.percent.toStringAsFixed(3)}%',
+                            style: AppStyles.percent),
+                        const SizedBox(height: 8),
+                        Text('Expected Total: ${currency.format(totalExpected)}',
+                            style: AppStyles.amount),
+                        const Divider(),
+                        // Text('Paid up to this payment: ${currency.format(paidUpToThis)}',
+                        //     style: AppStyles.amount.copyWith(color: Colors.green.shade700)),
+                        // Text('Remaining after this: ${currency.format(totalExpected - paidUpToThis)}',
+                        //     style: AppStyles.amount.copyWith(color: Colors.orange.shade800)),
+                        // const Divider(),
+                        Text('Current total paid: ${currency.format(totalReceived)}',
+                            style: AppStyles.amount.copyWith(color: Colors.green.shade700)),
+                        Text('Current remaining: ${currency.format(totalRemaining)}',
+                            style: AppStyles.amount.copyWith(color: Colors.orange.shade800)),
                       ],
                     ),
-                  ),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columns: const [
-                      DataColumn(label: Text('Shareholder')),
-                      DataColumn(label: Text('Percent')),
-                      DataColumn(label: Text('Amount (PKR)')),
-                    ],
-                    rows: parts
-                        .map(
-                          (p) => DataRow(
-                            color: WidgetStateProperty.all(p.shareholder.color.withOpacity(0.1)),
-                            cells: [
-                              DataCell(Text(p.shareholder.name)),
-                              DataCell(Text('${p.shareholder.percent.toStringAsFixed(3)}%',style: AppStyles.amount,)),
-                              DataCell(Text(currency.format(p.amount),style: AppStyles.percent,)),
-                            ],
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    'Sum: ${currency.format(totalParts)}',
-                    style: Theme.of(context)
-                        .textTheme
-                        .labelLarge
-                        ?.copyWith(fontWeight: FontWeight.w700),
                   ),
                 ),
               ],
@@ -579,57 +728,57 @@ Future<void> _addTransactionDialog() async {
     );
   }
 
-  Widget _editShares() {
-    final sumPercent = shareholders.fold<double>(0, (a, s) => a + s.percent).toStringAsFixed(2);
-    return ExpansionTile(
-      title: const Text('Edit Shareholders'),
-      subtitle: Text('Sum must be 100%. Current: $sumPercent%'),
-      childrenPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      children: [
-        Wrap(
-          runSpacing: 12,
-          spacing: 12,
-          children: [
-            for (var i = 0; i < shareholders.length; i++)
-              _ShareEditor(
-                key: ValueKey('share-$i'),
-                initialName: shareholders[i].name,
-                initialPercent: shareholders[i].percent,
-                onChanged: (name, pct) {
-                  setState(() {
-                    shareholders[i].name = name;
-                    if (pct != null && pct >= 0) shareholders[i].percent = pct;
-                  });
-                },
-              ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            if (!sharesValid)
-              Text(
-                'Shares must sum to 100%.',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            const Spacer(),
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  shareholders[0].percent = 26.66667;
-                  shareholders[1].percent = 26.66667;
-                  shareholders[2].percent = 26.66667;
-                  shareholders[3].percent = 20.0;
-                });
-              },
-              child: const Text('Reset to Original'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-      ],
-    );
-  }
+  // Widget _editShares() {
+  //   final sumPercent = shareholders.fold<double>(0, (a, s) => a + s.percent).toStringAsFixed(2);
+  //   return ExpansionTile(
+  //     title: const Text('Edit Shareholders'),
+  //     subtitle: Text('Sum must be 100%. Current: $sumPercent%'),
+  //     childrenPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+  //     children: [
+  //       Wrap(
+  //         runSpacing: 12,
+  //         spacing: 12,
+  //         children: [
+  //           for (var i = 0; i < shareholders.length; i++)
+  //             _ShareEditor(
+  //               key: ValueKey('share-$i'),
+  //               initialName: shareholders[i].name,
+  //               initialPercent: shareholders[i].percent,
+  //               onChanged: (name, pct) {
+  //                 setState(() {
+  //                   shareholders[i].name = name;
+  //                   if (pct != null && pct >= 0) shareholders[i].percent = pct;
+  //                 });
+  //               },
+  //             ),
+  //         ],
+  //       ),
+  //       const SizedBox(height: 8),
+  //       Row(
+  //         children: [
+  //           if (!sharesValid)
+  //             Text(
+  //               'Shares must sum to 100%.',
+  //               style: TextStyle(color: Theme.of(context).colorScheme.error),
+  //             ),
+  //           const Spacer(),
+  //           TextButton(
+  //             onPressed: () {
+  //               setState(() {
+  //                 shareholders[0].percent = 26.66667;
+  //                 shareholders[1].percent = 26.66667;
+  //                 shareholders[2].percent = 26.66667;
+  //                 shareholders[3].percent = 20.0;
+  //               });
+  //             },
+  //             child: const Text('Reset to Original'),
+  //           ),
+  //         ],
+  //       ),
+  //       const SizedBox(height: 8),
+  //     ],
+  //   );
+  // }
 
   @override
   Widget build(BuildContext context) {
@@ -668,6 +817,7 @@ Future<void> _addTransactionDialog() async {
                     setState(() {
                       kExpectedTotal = double.parse(ctrl.text.replaceAll(',', ''));
                     });
+                     _saveTotalAmount();
                     Navigator.pop(ctx);
                   },
                   child: const Text('Save'),
@@ -740,7 +890,7 @@ Future<void> _addTransactionDialog() async {
               },
             ),
             const SizedBox(height: 8),
-            _editShares(),
+            // _editShares(),
             const SizedBox(height: 12),
 
             Text('Shareholders', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
@@ -797,17 +947,34 @@ Future<void> _addTransactionDialog() async {
                 child: DataTable(
                   columns: const [
                     DataColumn(label: Text('Date')),
+                    DataColumn(label: Text('Shareholder')),
                     DataColumn(label: Text('Amount (PKR)')),
-                    DataColumn(columnWidth: FixedColumnWidth(300),label: Text('Note')),
+                    DataColumn(columnWidth: FixedColumnWidth(300), label: Text('Note')),
                     DataColumn(label: Text('')),
                   ],
                   rows: [
                     for (var i = 0; i < entries.length; i++)
                       DataRow(
+                        color: MaterialStatePropertyAll(entries[i].shareholder.color.withOpacity(0.1)),
                         cells: [
                           DataCell(Text(dateFmt.format(entries[i].date))),
-                          DataCell(Text(currency.format(entries[i].amount))),
-                          DataCell(Text(entries[i].note.isEmpty ? 'None':entries[i].note)),
+                          DataCell(Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 12,
+                                height: 12,
+                                margin: const EdgeInsets.only(right: 8),
+                                decoration: BoxDecoration(
+                                  color: entries[i].shareholder.color,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              Text(entries[i].shareholder.name),
+                            ],
+                          )),
+                          DataCell(Text(currency.format(entries[i].amount), style: AppStyles.amount)),
+                          DataCell(Text(entries[i].note,maxLines: 2,overflow: TextOverflow.ellipsis,)),
                           DataCell(
                             Row(
                               mainAxisSize: MainAxisSize.min,
@@ -908,8 +1075,4 @@ class _ShareEditorState extends State<_ShareEditor> {
   }
 }
 
-class _SharePart {
-  _SharePart({required this.shareholder, required this.amount});
-  final Shareholder shareholder;
-  final double amount;
-}
+
