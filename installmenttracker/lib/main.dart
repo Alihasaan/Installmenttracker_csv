@@ -152,6 +152,23 @@ class _HomePageState extends State<HomePage> {
     try {
       final dataDir = Directory('data');
       final csvFile = File('${dataDir.path}/transactions.csv');
+      final csvFileTotalAmount = File('${dataDir.path}/total_amount.csv');
+
+      // If a total_amount.csv exists in the data folder, read and apply it first
+      if (csvFileTotalAmount.existsSync()) {
+        try {
+          final totalContent = await csvFileTotalAmount.readAsString(encoding: utf8);
+          final totalRows = const CsvToListConverter(eol: '\n').convert(totalContent, shouldParseNumbers: false);
+          if (totalRows.length >= 2 && totalRows[0].isNotEmpty && totalRows[0][0].toString().trim() == 'total_amount') {
+            final total = double.tryParse(totalRows[1][0].toString().trim());
+            if (total != null && total > 0) {
+              // update kExpectedTotal on the UI thread
+              setState(() => kExpectedTotal = total);
+            }
+          }
+        } catch (_) {}
+      }
+
       if (!csvFile.existsSync()) return;
 
       final content = await csvFile.readAsString(encoding: utf8);
